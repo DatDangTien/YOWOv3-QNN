@@ -11,6 +11,7 @@ weights/
 testing_code/
 lab/
 lab.py
+*.onnx
 
 # Distribution / packaging
 .Python
@@ -123,3 +124,6 @@ dmypy.json
 
 # Cython debug symbols
 cython_debug/
+
+# artifacts
+*.mp4

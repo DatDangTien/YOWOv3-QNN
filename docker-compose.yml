@@ -1,0 +1,21 @@
+version: '3.8'
+
+services:
+  yowo-api:
+    build: .
+    container_name: yowo_api
+    ports:
+      - "8090:8000"
+    volumes:
+      - .:/app
+      - ./weights:/weights
+    environment:
+      - CONFIG_PATH=weights/ava/SE/config.yaml
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: 1
+              capabilities: [gpu]
+    restart: unless-stopped

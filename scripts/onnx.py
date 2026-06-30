@@ -27,28 +27,81 @@ def export2onnx(config):
     onnx_model_path = "yowov3.onnx"
     ort_session = onnxruntime.InferenceSession(onnx_model_path)
 
-    dataset = build_dataset(config, phase='test')
+    
 
-    for idx in range(dataset.__len__()):
-        origin_image, clip, bboxes, labels = dataset.__getitem__(idx, get_origin_image=True)
+    video_path = "test_video_h264.mp4"
+    cap = cv2.VideoCapture(video_path)
+    if not cap.isOpened():
+        print(f"Error: Could not open video file {video_path}")
+        return
 
-        clip = clip.unsqueeze(0)       
+    # Video properties
+    width  = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+    height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+    fps    = cap.get(cv2.CAP_PROP_FPS)
+    if fps == 0 or fps is None:
+        fps = 30.0
 
-        input_data = {ort_session.get_inputs()[0].name: clip.numpy()}
-        outputs = torch.tensor(ort_session.run(None, input_data))
-        #outputs = torch.from_numpy(outputs[0])
-        outputs = non_max_suppression(outputs[0], conf_threshold=0.3, iou_threshold=0.5)[0]
-        origin_image = cv2.resize(origin_image, (config['img_size'], config['img_size']))
-        draw_bounding_box(origin_image, outputs[:, :4], outputs[:, 5], outputs[:, 4], mapping)
+    # Output video writer
+    output_path = "test_video_h264_out.mp4"
+    img_size = config['img_size']
+    fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+    out = cv2.VideoWriter(output_path, fourcc, fps, (img_size, img_size))
 
-        flag = 1 
-        if flag:
-            cv2.imshow('img', origin_image)
-            k = cv2.waitKey(1)
-            if k == ord('q'):
-                return
+    # Preprocessing mean/std
+    mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1, 1)
+    std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1, 1)
+
+    frame_queue = []
+    frame_index = 0
+
+    print("Starting video inference...")
+    while True:
+        ret, frame = cap.read()
+        if not ret:
+            break
+
+        # Resize to model input size for consistency
+        resized_frame = cv2.resize(frame, (img_size, img_size))
+
+        # Preprocess frame for the clip (BGR -> RGB, then normalize)
+        rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
+        normalized_frame = rgb_frame.astype(np.float32) / 255.0
+
+        # Maintain 16-frame sliding window
+        if len(frame_queue) == 0:
+            for _ in range(16):
+                frame_queue.append(normalized_frame)
         else:
-            cv2.imwrite(r"H:\detect_images\_" + str(idx) + r".jpg", origin_image)
+            frame_queue.append(normalized_frame)
+            frame_queue.pop(0)
 
-            print("ok")
-            print("image {} saved!".format(idx))
+        # Stack along temporal axis -> [16, H, W, C]
+        clip_np = np.stack(frame_queue, axis=0)
+        # Permute to [C, T, H, W] -> [3, 16, H, W]
+        clip_np = np.transpose(clip_np, (3, 0, 1, 2))
+        # Normalize
+        clip_np = (clip_np - mean) / std
+        # Add batch dimension -> [1, 3, 16, H, W]
+        clip_np = np.expand_dims(clip_np, axis=0).astype(np.float32)
+
+        # Inference
+        input_data = {ort_session.get_inputs()[0].name: clip_np}
+        outputs = torch.tensor(ort_session.run(None, input_data)[0])
+        
+        # Postprocessing: NMS
+        det_outputs = non_max_suppression(outputs, conf_threshold=0.3, iou_threshold=0.5)[0]
+
+        # Draw visualized bboxes on current frame
+        draw_bounding_box(resized_frame, det_outputs[:, :4], det_outputs[:, 5], det_outputs[:, 4], mapping)
+
+        # Write frame to output video
+        out.write(resized_frame)
+
+        frame_index += 1
+        if frame_index % 50 == 0:
+            print(f"Processed {frame_index} frames...")
+
+    cap.release()
+    out.release()
+    print(f"Inference complete! Output saved to {output_path}")

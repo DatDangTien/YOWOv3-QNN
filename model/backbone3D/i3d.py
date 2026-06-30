@@ -317,7 +317,7 @@ class InceptionI3d(nn.Module):
             if end_point in self.end_points:
                 x = self._modules[end_point](x) # use _modules to work with dataparallel
 
-        x = F.avg_pool3d(x, kernel_size=(x.shape[2], 1, 1), stride=1)
+        x = x.mean(dim=2, keepdim=True)
         return x
         
 
