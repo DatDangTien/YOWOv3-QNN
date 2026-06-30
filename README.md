@@ -34,20 +34,15 @@ Our change to `i3d.py` (replacing dynamic `avg_pool3d` with `mean`) enables smoo
     python main.py --mode onnx --config <config_file>
     ```
 2.  **Convert ONNX to Qualcomm DLC (Deep Learning Container)**:
-    Use the QNN SDK converter tool:
     ```bash
-    qnn-onnx-converter -i yowov3.onnx -o yowov3.dlc
+    python scripts/qnn.py --model <onnx model dir> --out-dir weights/qnn --device <Qualcomm device>
     ```
 3.  **Quantize the DLC for NPU Execution**:
     Snapdragon NPUs operate most efficiently with 8-bit quantization (`INT8`). Quantize the model using representative calibration data (saving 16-frame clip tensors to binary raw file format):
     ```bash
-    qnn-model-quantizer \
-      --input_network yowov3.dlc \
-      --input_list calibration_data_list.txt \
-      --output_list yowov3_quantized.dlc \
-      --param_quantizer symmetric \
-      --act_quantizer asymmetric_sinusoid
+    python scripts/qnn.py --model <onnx model dir> --out-dir weights/qnn --device <Qualcomm device> --quantize [--calib-dir <images_dir>]
     ```
+    If no calib-dir provided, the calib data is genderated randomly.
 
 ### Inference on QNN
 To execute the compiled model on device, you can:

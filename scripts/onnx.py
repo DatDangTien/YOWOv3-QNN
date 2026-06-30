@@ -1,4 +1,5 @@
 from model.TSN.YOWOv3 import build_yowov3
+from model.TSN.YOWOv3Normalized import YOWOv3Normalized
 from cus_datasets.build_dataset import build_dataset
 from utils.box import non_max_suppression
 import onnxruntime
@@ -12,9 +13,16 @@ def export2onnx(config):
     model   = build_yowov3(config) 
     model.eval()
 
-    dummy_input = torch.randn(1, 3, 16, 224, 224)
+    # Wrap the model to handle normalization in-graph
+    mean = [0.485, 0.456, 0.406]
+    std = [0.229, 0.224, 0.225]
+    normalized_model = YOWOv3Normalized(model, mean, std)
+    normalized_model.eval()
 
-    torch.onnx.export(model,
+    # Export using float32 dummy input of shape [B, C, T, H, W] in range [0.0, 1.0]
+    dummy_input = torch.randn(1, 3, 16, 224, 224, dtype=torch.float32)
+
+    torch.onnx.export(normalized_model,
                     dummy_input,
                     "yowov3.onnx",
                     verbose=False,
@@ -26,8 +34,6 @@ def export2onnx(config):
     mapping = config['idx2name']
     onnx_model_path = "yowov3.onnx"
     ort_session = onnxruntime.InferenceSession(onnx_model_path)
-
-    
 
     video_path = "test_video_h264.mp4"
     cap = cv2.VideoCapture(video_path)
@@ -48,10 +54,6 @@ def export2onnx(config):
     fourcc = cv2.VideoWriter_fourcc(*'mp4v')
     out = cv2.VideoWriter(output_path, fourcc, fps, (img_size, img_size))
 
-    # Preprocessing mean/std
-    mean = np.array([0.485, 0.456, 0.406]).reshape(3, 1, 1, 1)
-    std = np.array([0.229, 0.224, 0.225]).reshape(3, 1, 1, 1)
-
     frame_queue = []
     frame_index = 0
 
@@ -64,7 +66,7 @@ def export2onnx(config):
         # Resize to model input size for consistency
         resized_frame = cv2.resize(frame, (img_size, img_size))
 
-        # Preprocess frame for the clip (BGR -> RGB, then normalize)
+        # Preprocess frame for the clip (BGR -> RGB, then scale to [0, 1])
         rgb_frame = cv2.cvtColor(resized_frame, cv2.COLOR_BGR2RGB)
         normalized_frame = rgb_frame.astype(np.float32) / 255.0
 
@@ -80,9 +82,7 @@ def export2onnx(config):
         clip_np = np.stack(frame_queue, axis=0)
         # Permute to [C, T, H, W] -> [3, 16, H, W]
         clip_np = np.transpose(clip_np, (3, 0, 1, 2))
-        # Normalize
-        clip_np = (clip_np - mean) / std
-        # Add batch dimension -> [1, 3, 16, H, W]
+        # Add batch dimension -> [1, 3, 16, H, W] (the model expects float32 input)
         clip_np = np.expand_dims(clip_np, axis=0).astype(np.float32)
 
         # Inference
