@@ -72,17 +72,20 @@ def quantize(hub, onnx_path: Path, calib_dir: str | None):
 
 def compile_qnn(hub, model_src, device):
     print(f"[compile] QNN context binary on '{device.name}' ...")
-    cjob = hub.submit_compile_job(
-        model=model_src,
+    compile_jobs, link_job = hub.submit_compile_and_link_jobs(
+        models=model_src,
         device=device,
         name="yowov3-qnn",
-        options="--target_runtime qnn_context_binary",
     )
-    target = cjob.get_target_model()
+    if link_job is None:
+        url = compile_jobs[0].url if compile_jobs else "unknown"
+        raise RuntimeError(f"compile failed: {url}")
+        
+    target = link_job.get_target_model()
     if target is None:
-        raise RuntimeError(f"compile failed: {cjob.url}")
-    print(f"[compile] done: {cjob.url}")
-    return cjob, target
+        raise RuntimeError(f"link failed: {link_job.url}")
+    print(f"[compile] done: {link_job.url}")
+    return link_job, target
 
 def profile(hub, target, device):
     print(f"[profile] on '{device.name}' ...")
