@@ -6,6 +6,21 @@ try:
     import qai_hub as hub
 except ImportError:
     sys.exit("qai_hub missing — env should have qai-hub.")
+
+# Patch QAI Hub request timeout to prevent S3 connection timeout errors
+try:
+    import os
+    import qai_hub.util.session as qai_session
+    qai_timeout = float(os.environ.get("QAI_HUB_TIMEOUT", "600.0"))
+    original_request = qai_session.SessionWithRetryAndTimeout.request
+    def custom_request(self, method, url, *args, **kwargs):
+        kwargs['timeout'] = (qai_timeout, qai_timeout)
+        return original_request(self, method, url, *args, **kwargs)
+    qai_session.SessionWithRetryAndTimeout.request = custom_request
+    print(f"[qnn] Patched QAI Hub request timeout to {qai_timeout}s.")
+except Exception as e:
+    print(f"[qnn] WARNING: failed to patch QAI Hub request timeout: {e}")
+
 import onnxruntime as Ort
 
 MODEL_INPUT = [1, 3, 16, 224, 224]
