@@ -42,7 +42,24 @@ class MaxPool3dSamePadding(nn.MaxPool3d):
         #print x.size()
         #print pad
         x = F.pad(x, pad)
-        return super(MaxPool3dSamePadding, self).forward(x)
+        B, C, T, H, W = x.size()
+        
+        # Spatial pooling
+        if self.kernel_size[1] > 1 or self.kernel_size[2] > 1 or self.stride[1] > 1 or self.stride[2] > 1:
+            x = x.transpose(1, 2).reshape(B * T, C, H, W)
+            x = F.max_pool2d(x, kernel_size=(self.kernel_size[1], self.kernel_size[2]), stride=(self.stride[1], self.stride[2]))
+            _, _, H2, W2 = x.size()
+            x = x.reshape(B, T, C, H2, W2).transpose(1, 2)
+            H, W = H2, W2
+            
+        # Temporal pooling
+        if self.kernel_size[0] > 1 or self.stride[0] > 1:
+            x = x.permute(0, 3, 4, 1, 2).reshape(B * H * W, C, T, 1)
+            x = F.max_pool2d(x, kernel_size=(self.kernel_size[0], 1), stride=(self.stride[0], 1))
+            _, _, T2, _ = x.size()
+            x = x.reshape(B, H, W, C, T2).permute(0, 3, 4, 1, 2)
+            
+        return x
     
 
 class Unit3D(nn.Module):
