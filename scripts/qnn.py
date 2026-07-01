@@ -33,7 +33,7 @@ def make_calib_data(onnx_path, calib_dir: str | None):
     input_name = onnx_session.get_inputs()[0].name
     if calib_dir:
         import cv2
-        files = sorted(Path(calib_dir).glob("*"))
+        files = sorted([f for f in Path(calib_dir).rglob("*") if f.is_file()])
         samples = []
         h, w, c = MODEL_INPUT[3:], MODEL_INPUT[1]
         chunk = []
