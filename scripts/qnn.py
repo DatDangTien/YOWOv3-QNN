@@ -9,6 +9,7 @@ except ImportError:
 import onnxruntime as Ort
 
 MODEL_INPUT = [1, 3, 16, 224, 224]
+CHUNK_SIZE = 16
 CALIB_SIZE = 128
 
 def make_calib_data(calib_dir: str | None):
@@ -18,16 +19,15 @@ def make_calib_data(calib_dir: str | None):
         files = sorted(Path(calib_dir).glob("*"))
         samples = []
         h, w, c = MODEL_INPUT[3:], MODEL_INPUT[1]
-        chunk_size = MODEL_INPUT[2]
         chunk = []
         for f in files[:CALIB_SIZE]:
-            assert CALIB_SIZE % chunk_size == 0, f"CALIB_SIZE {CALIB_SIZE} must be divisible by chunk_size {chunk_size}"
+            assert CALIB_SIZE % CHUNK_SIZE == 0, f"CALIB_SIZE {CALIB_SIZE} must be divisible by chunk_size {CHUNK_SIZE}"
             img = cv2.imread(str(f))  # BGR
             if img is None:
                 continue
             img = cv2.resize(img, (w, h)).astype(np.float32) / 255.0  # host preprocess
             chunk.append(img[None, ...])
-            if len(chunk) == chunk_size:
+            if len(chunk) == CHUNK_SIZE:
                 samples.append((np.transpose(np.concatenate(chunk, axis=0), (3,0,1,2)))[None, ...]) # [1,C,D,H,W]
                 chunk = []
         if not samples:
@@ -36,7 +36,7 @@ def make_calib_data(calib_dir: str | None):
         return {"input": samples}
     print("[quantize] WARNING: random calibration data (low accuracy). Use --calib-dir.")
     rng = np.random.default_rng(0)
-    return {"input": [rng.random(size=MODEL_INPUT, dtype=np.float32) for _ in range(CALIB_SIZE // chunk_size)]}
+    return {"input": [rng.random(size=MODEL_INPUT, dtype=np.float32) for _ in range(CALIB_SIZE // CHUNK_SIZE)]}
 
 
 def quantize(hub, onnx_path: Path, calib_dir: str | None):
@@ -125,7 +125,7 @@ def main(argv=None):
     out_dir.mkdir(parents=True, exist_ok=True)
 
     device = hub.Device(args.device)
-    onnx_path = Path(args.onnx_path)
+    onnx_path = Path(args.model)
 
     if not onnx_path.exists():
         sys.exit(f"Error: ONNX model file does not exist: {onnx_path}")
