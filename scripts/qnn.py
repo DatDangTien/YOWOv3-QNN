@@ -27,8 +27,10 @@ MODEL_INPUT = [1, 3, 16, 224, 224]
 CHUNK_SIZE = 16
 CALIB_SIZE = 128
 
-def make_calib_data(calib_dir: str | None):
+def make_calib_data(onnx_path, calib_dir: str | None):
     """Calibration entries for optional quantize. Random unless calib_dir of images given."""    
+    onnx_session = Ort.InferenceSession(str(onnx_path))
+    input_name = onnx_session.get_inputs()[0].name
     if calib_dir:
         import cv2
         files = sorted(Path(calib_dir).glob("*"))
@@ -48,15 +50,15 @@ def make_calib_data(calib_dir: str | None):
         if not samples:
             raise RuntimeError(f"no readable images in {calib_dir}")
 
-        return {"input": samples}
+        return {input_name: samples}
     print("[quantize] WARNING: random calibration data (low accuracy). Use --calib-dir.")
     rng = np.random.default_rng(0)
-    return {"input": [rng.random(size=MODEL_INPUT, dtype=np.float32) for _ in range(CALIB_SIZE // CHUNK_SIZE)]}
+    return {input_name: [rng.random(size=MODEL_INPUT, dtype=np.float32) for _ in range(CALIB_SIZE // CHUNK_SIZE)]}
 
 
 def quantize(hub, onnx_path: Path, calib_dir: str | None):
     """Optional INT8 quantize. Default flow skips this entirely."""
-    calib = make_calib_data(calib_dir)
+    calib = make_calib_data(onnx_path,  calib_dir)
     print("[quantize] submitting INT8 quantize job ...")
     qjob = hub.submit_quantize_job(
         model=str(onnx_path),
@@ -104,7 +106,7 @@ def verify(hub, target, onnx_model, device, seed: int = 0):
     print(f"[verify] inference job on '{device.name}' ...")
     ijob = hub.submit_inference_job(
         model=target, device=device,
-        inputs={"input": [sample]},
+        inputs={input_name: [sample]},
         name="yowov3-verify",
     )
     out = ijob.download_output_data()
