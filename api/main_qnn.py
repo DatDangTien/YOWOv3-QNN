@@ -172,9 +172,11 @@ async def websocket_endpoint(websocket: WebSocket):
     except WebSocketDisconnect:
         print("Client disconnected")
 
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", 8000))
 
 def main():
-    uvicorn.run("api.main_qnn:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("api.main_qnn:app", host=HOST, port=PORT, reload=True)
 
 
 if __name__ == "__main__":
