@@ -22,10 +22,11 @@ except Exception as e:
     print(f"[qnn] WARNING: failed to patch QAI Hub request timeout: {e}")
 
 import onnxruntime as Ort
+from tqdm import tqdm
 
 MODEL_INPUT = [1, 3, 16, 224, 224]
-CHUNK_SIZE = 16
-CALIB_SIZE = 128
+CALIB_SIZE = 1000
+CHUNK_SIZE = MODEL_INPUT[2]
 
 def make_calib_data(onnx_path, calib_dir: str | None):
     """Calibration entries for optional quantize. Random unless calib_dir of images given."""    
@@ -34,26 +35,33 @@ def make_calib_data(onnx_path, calib_dir: str | None):
     if calib_dir:
         import cv2
         files = sorted([f for f in Path(calib_dir).rglob("*") if f.is_file()])
+        print(f"[calib_data] num_files: {len(files)}")
         samples = []
-        h, w, c = MODEL_INPUT[3:], MODEL_INPUT[1]
+        h, w, c = MODEL_INPUT[3], MODEL_INPUT[4], MODEL_INPUT[1]
         chunk = []
-        for f in files[:CALIB_SIZE]:
-            assert CALIB_SIZE % CHUNK_SIZE == 0, f"CALIB_SIZE {CALIB_SIZE} must be divisible by chunk_size {CHUNK_SIZE}"
+        for f in tqdm(files, desc="Process calibration images"):
             img = cv2.imread(str(f))  # BGR
             if img is None:
                 continue
-            img = cv2.resize(img, (w, h)).astype(np.float32) / 255.0  # host preprocess
+            img = cv2.cvtColor(cv2.resize(img, (w, h)), cv2.COLOR_BGR2RGB).astype(np.float32) / 255.0  # host preprocess
             chunk.append(img[None, ...])
             if len(chunk) == CHUNK_SIZE:
                 samples.append((np.transpose(np.concatenate(chunk, axis=0), (3,0,1,2)))[None, ...]) # [1,C,D,H,W]
                 chunk = []
+            if len(samples) >= CALIB_SIZE:
+                break
         if not samples:
             raise RuntimeError(f"no readable images in {calib_dir}")
-
+        
+        total_bytes = sum(s.nbytes for s in samples)
+        print(f"[calib_data] num samples: {len(samples)} ({total_bytes / (1024 * 1024):.2f} MB)")
         return {input_name: samples}
     print("[quantize] WARNING: random calibration data (low accuracy). Use --calib-dir.")
     rng = np.random.default_rng(0)
-    return {input_name: [rng.random(size=MODEL_INPUT, dtype=np.float32) for _ in range(CALIB_SIZE // CHUNK_SIZE)]}
+    calib_list = [rng.random(size=MODEL_INPUT, dtype=np.float32) for _ in range(CALIB_SIZE)]
+    total_bytes = sum(s.nbytes for s in calib_list)
+    print(f"[calib_data] num samples: {CALIB_SIZE} ({total_bytes / (1024 * 1024):.2f} MB)")
+    return {input_name: calib_list}
 
 
 def quantize(hub, onnx_path: Path, calib_dir: str | None):
