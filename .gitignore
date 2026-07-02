@@ -129,3 +129,4 @@ cython_debug/
 *.mp4
 
 data/
+thirdparty/
