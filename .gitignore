@@ -127,3 +127,5 @@ cython_debug/
 
 # artifacts
 *.mp4
+
+data/
